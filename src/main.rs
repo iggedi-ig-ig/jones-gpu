@@ -19,7 +19,7 @@ pub mod render;
 pub mod simulation;
 
 /// grid side length
-const GRID_SIZE: f32 = 100.0;
+const GRID_SIZE: f32 = 500.0;
 
 /// cell side length
 const CELL_SIZE: f32 = 2.0;

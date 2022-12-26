@@ -39,14 +39,13 @@ pub struct HashGrid {
     cell_count: u32,
 
     interact_pipeline: ComputePipeline,
-    // integrate_pipeline: ComputePipeline,
+    integrate_pipeline: ComputePipeline,
+
     atom_buffer_curr: Buffer,
     atom_buffer_last: Buffer,
     atom_buffer_size: BufferAddress,
     atom_bind_group: BindGroup,
-
     cell_buffer: Buffer,
-    cell_bind_group: BindGroup,
 }
 
 impl HashGrid {
@@ -117,6 +116,17 @@ impl HashGrid {
                     },
                     count: None,
                 },
+                // cell buffer
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let atom_bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -131,34 +141,16 @@ impl HashGrid {
                     binding: 1,
                     resource: atom_buffer_last.as_entire_binding(),
                 },
-            ],
-        });
-
-        let cell_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Cell Bind Group Layout"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+                BindGroupEntry {
+                    binding: 2,
+                    resource: cell_buffer.as_entire_binding(),
                 },
-                count: None,
-            }],
-        });
-        let cell_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Cell Bind Group"),
-            layout: &cell_bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: cell_buffer.as_entire_binding(),
-            }],
+            ],
         });
 
         let interact_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Interact Pipeline Layout"),
-            bind_group_layouts: &[&atom_bind_group_layout, &cell_bind_group_layout],
+            bind_group_layouts: &[&atom_bind_group_layout],
             push_constant_ranges: &[PushConstantRange {
                 stages: ShaderStages::COMPUTE,
                 range: 0..size_of::<PushConstants>() as u32,
@@ -169,21 +161,20 @@ impl HashGrid {
             label: Some("Interaction Compute Pipeline"),
             layout: Some(&interact_layout),
             module: &interact_shader,
-            entry_point: "main",
+            entry_point: "main_interact",
         });
 
-        // let integrate_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-        //     label: Some("Integrate Pipeline Layout"),
-        //     bind_group_layouts: &[&atom_bind_group_layout],
-        //     push_constant_ranges: &[],
-        // });
-        // let integrate_shader = device.create_shader_module(include_wgsl!("shaders/integrate.wgsl"));
-        // let integrate_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        //     label: Some("Integrate Compute Pipeline"),
-        //     layout: Some(&integrate_layout),
-        //     module: &integrate_shader,
-        //     entry_point: "main",
-        // });
+        let integrate_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Integrate Pipeline Layout"),
+            bind_group_layouts: &[&atom_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let integrate_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Integrate Compute Pipeline"),
+            layout: Some(&integrate_layout),
+            module: &interact_shader,
+            entry_point: "main_integrate",
+        });
 
         Self {
             grid_side_length,
@@ -192,29 +183,45 @@ impl HashGrid {
             cell_count: (cells_per_side * cells_per_side) as u32,
 
             interact_pipeline,
-            // integrate_pipeline: integrate_pipeline,
+            integrate_pipeline,
+
             atom_buffer_curr,
             atom_buffer_last,
             atom_buffer_size,
             atom_bind_group,
-
             cell_buffer,
-            cell_bind_group,
         }
     }
 
     pub fn update(&self, command_encoder: &mut CommandEncoder) {
-        let mut compute_pass = command_encoder.begin_compute_pass(&ComputePassDescriptor {
+        let mut interact_pass = command_encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Interact Pass"),
         });
 
-        compute_pass.set_pipeline(&self.interact_pipeline);
-        compute_pass.set_bind_group(0, &self.atom_bind_group, &[]);
-        compute_pass.set_bind_group(1, &self.cell_bind_group, &[]);
-        compute_pass.set_push_constants(0, bytemuck::bytes_of(&self.cells_per_side));
-        compute_pass.dispatch_workgroups(self.cells_per_side as u32, self.cells_per_side as u32, 1);
+        interact_pass.set_pipeline(&self.interact_pipeline);
+        interact_pass.set_bind_group(0, &self.atom_bind_group, &[]);
+        interact_pass.set_push_constants(0, bytemuck::bytes_of(&self.cells_per_side));
+        interact_pass.dispatch_workgroups(
+            self.cells_per_side as u32,
+            self.cells_per_side as u32,
+            1,
+        );
 
-        drop(compute_pass);
+        drop(interact_pass);
+
+        let mut integrate_pass = command_encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Integrate Pass"),
+        });
+
+        integrate_pass.set_pipeline(&self.integrate_pipeline);
+        integrate_pass.set_bind_group(0, &self.atom_bind_group, &[]);
+        integrate_pass.dispatch_workgroups(
+            self.cells_per_side as u32,
+            self.cells_per_side as u32,
+            1,
+        );
+
+        drop(integrate_pass);
 
         command_encoder.copy_buffer_to_buffer(
             &self.atom_buffer_curr,

@@ -34,7 +34,7 @@ fn main_vs(vs_inputs: VertexInput) -> VertexOutput {
         (vs_inputs.position * radius - push_constants.position + vs_inputs.instance_position) * vec2<f32>(push_constants.inv_aspect, 1.0) * push_constants.scale,
             0.0,
             1.0);
-    out.color_variable = length(vs_inputs.instance_force);
+    out.color_variable = length(vs_inputs.instance_force) * 0.005;
     out.model_pos = vs_inputs.position.xy*2.0;
     return out;
 }

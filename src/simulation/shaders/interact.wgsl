@@ -18,7 +18,7 @@ struct PushConstants {
 
 @group(0) @binding(0) var<storage, read_write> atoms_curr: array<Atom>;
 @group(0) @binding(1) var<storage, read> atoms_last: array<Atom>;
-@group(1) @binding(0) var<storage, read_write> cells: array<Cell>;
+@group(0) @binding(2) var<storage, read_write> cells: array<Cell>;
 
 var<push_constant> push_constants: PushConstants;
 
@@ -39,7 +39,7 @@ fn hash(id: vec2<i32>) -> i32 {
 
 @compute
 @workgroup_size(1)
-fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+fn main_interact(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let global_id = vec3<i32>(invocation_id);
 
     let self_index = hash(global_id.xy);
@@ -52,8 +52,9 @@ fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let other_cell = &cells[other_index];
 
             for (var j = 0; j < min(16, (*self_cell).count); j++) {
+                let self_index = (*self_cell).indices[j];
+
                 for (var i = 0; i < min(16, (*other_cell).count); i++) {
-                    let self_index = (*self_cell).indices[j];
                     let other_index = (*other_cell).indices[i];
 
                     if (self_index != other_index) {
@@ -69,20 +70,37 @@ fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
                         let force = diff * force_mag_mult;
 
                         // interact
-                        let mass = 1.0;
-                        atoms_curr[self_index].vel_x += force.x / mass;
-                        atoms_curr[self_index].vel_y += force.y / mass;
-
-                        atoms_curr[self_index].force_x = force.x;
-                        atoms_curr[self_index].force_y = force.y;
-
-                        // integrate
-                        let time_step = 1e-6;
-                        atoms_curr[self_index].pos_x += atoms_curr[self_index].vel_x * time_step;
-                        atoms_curr[self_index].pos_y += atoms_curr[self_index].vel_y * time_step;
+                        atoms_curr[self_index].force_x += force.x;
+                        atoms_curr[self_index].force_y += force.y;
                     }
                 }
             }
         }
+    }
+}
+
+@compute
+@workgroup_size(1)
+fn main_integrate(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let self_id = hash(vec2<i32>(global_id.xy));
+    let self_cell = &cells[self_id];
+
+    let time_step = 1e-3;
+    let mass = 1.0;
+
+    for (var i = 0; i < min(16, (*self_cell).count); i++) {
+        let index = (*self_cell).indices[i];
+
+        atoms_curr[index].vel_x += atoms_curr[index].force_x / mass;
+        atoms_curr[index].vel_y += atoms_curr[index].force_y / mass;
+
+        atoms_curr[index].vel_x *= 0.99995;
+        atoms_curr[index].vel_y *= 0.99995;
+
+        atoms_curr[index].pos_x += atoms_curr[index].vel_x * time_step;
+        atoms_curr[index].pos_y += atoms_curr[index].vel_y * time_step;
+
+        atoms_curr[index].force_x = 0.0;
+        atoms_curr[index].force_y = 0.0;
     }
 }
