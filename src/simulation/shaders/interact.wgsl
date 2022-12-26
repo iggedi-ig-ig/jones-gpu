@@ -27,26 +27,28 @@ fn lennard_jones(dist_sq: f32) -> f32 {
     let sigma_fac = 1.122462048309373;
     let sigma = desired_radius / sigma_fac;
     let sigma_6 = sigma * sigma * sigma * sigma * sigma * sigma;
-    let epsilon = 0.75;
+    let epsilon = 0.25;
 
-    return max(-1e7, 24.0 * epsilon * sigma_6 * (dist_sq * dist_sq * dist_sq - 2.0 * sigma_6) / (dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq));
+
+    return max(-1e7, (24.0 * epsilon * sigma_6 * (dist_sq * dist_sq * dist_sq - 2.0 * sigma_6)) / (dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq));
 }
 
 fn hash(id: vec2<i32>) -> i32 {
-    return id.y * push_constants.cells_per_side + id.x;
+    return clamp(id.y, 0, push_constants.cells_per_side) * push_constants.cells_per_side + clamp(id.x, 0, push_constants.cells_per_side);
 }
 
 @compute
-@workgroup_size(16, 16, 1)
+@workgroup_size(1)
 fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let global_id = vec3<i32>(invocation_id);
 
     let self_index = hash(global_id.xy);
     let self_cell = &cells[self_index];
 
-    for (var y_offs = -1; y_offs <= 1; y_offs++) {
-        for(var x_offs = -1; x_offs <= 1; x_offs++) {
-            let other_index = hash(global_id.xy + vec2<i32>(x_offs, y_offs));
+    let n = push_constants.cells_per_side;
+    for (var y_pos = max(0, global_id.y - 1); y_pos <= min(global_id.y + 1, n); y_pos++) {
+        for(var x_pos = max(0, global_id.x - 1); x_pos <= min(global_id.x + 1, n); x_pos++) {
+            let other_index = hash(vec2<i32>(x_pos, y_pos));
             let other_cell = &cells[other_index];
 
             for (var j = 0; j < min(16, (*self_cell).count); j++) {
@@ -69,15 +71,21 @@ fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
                     let mass = 100.0;
                     atoms_curr[self_index].vel_x += force.x / mass;
                     atoms_curr[self_index].vel_y += force.y / mass;
-                    atoms_curr[other_index].vel_x -= force.x / mass;
-                    atoms_curr[other_index].vel_y -= force.y / mass;
+//                    atoms_curr[other_index].vel_x -= force.x / mass;
+//                    atoms_curr[other_index].vel_y -= force.y / mass;
+
+                    atoms_curr[self_index].force_x = force.x;
+                    atoms_curr[self_index].force_y = force.y;
+//                    atoms_curr[other_index].force_x = -force.x;
+//                    atoms_curr[other_index].force_y = -force.y;
+
 
                     // integrate
-                    let time_step = 1e-6;
+                    let time_step = 1e-5;
                     atoms_curr[self_index].pos_x += atoms_curr[self_index].vel_x * time_step;
                     atoms_curr[self_index].pos_y += atoms_curr[self_index].vel_y * time_step;
-                    atoms_curr[other_index].pos_x += atoms_curr[other_index].vel_x * time_step;
-                    atoms_curr[other_index].pos_y += atoms_curr[other_index].vel_y * time_step;
+//                    atoms_curr[other_index].pos_x += atoms_curr[other_index].vel_x * time_step;
+//                    atoms_curr[other_index].pos_y += atoms_curr[other_index].vel_y * time_step;
                 }
             }
         }

@@ -84,6 +84,8 @@ impl HashGrid {
             cell.count += 1;
         });
 
+        dbg!(cells.iter().max_by_key(|cell| cell.count).map(|a| a.count));
+
         let cell_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Cell Buffer"),
             contents: bytemuck::cast_slice(&cells),

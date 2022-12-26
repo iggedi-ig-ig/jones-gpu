@@ -4,7 +4,7 @@ use crate::simulation::Atom;
 use eyre::Result;
 use nalgebra::Vector2;
 use rand::rngs::StdRng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use std::mem::size_of;
 use wgpu::{
     Backends, CommandEncoderDescriptor, CompositeAlphaMode, DeviceDescriptor, Features, Instance,
@@ -19,7 +19,7 @@ pub mod render;
 pub mod simulation;
 
 /// grid side length
-const GRID_SIZE: f32 = 100.0;
+const GRID_SIZE: f32 = 10.0;
 
 /// cell side length
 const CELL_SIZE: f32 = 2.0;
@@ -67,9 +67,13 @@ async fn main() -> Result<()> {
     let count = (GRID_SIZE / 1.0).floor() as usize
         * (GRID_SIZE / (3.0f32.sqrt() * 0.5) / 1.0).floor() as usize; // hex
     let atoms = (0..count)
-        .map(|i| {
+        .filter_map(|i| {
+            if rng.gen::<f32>() < 0.01 {
+                return None;
+            }
+
             let pos = hexagonal_lattice(i, &mut rng);
-            Atom::new(pos, Vector2::zeros(), Vector2::zeros())
+            Some(Atom::new(pos, Vector2::zeros(), Vector2::zeros()))
         })
         .collect::<Vec<_>>();
 
