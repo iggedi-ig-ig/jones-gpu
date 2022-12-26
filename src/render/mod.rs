@@ -36,7 +36,7 @@ impl Vertex {
 }
 
 pub struct RenderState {
-    render_pipeline: RenderPipeline,
+    pipeline: RenderPipeline,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
     index_count: u32,
@@ -138,7 +138,7 @@ impl RenderState {
         });
 
         Self {
-            render_pipeline,
+            pipeline: render_pipeline,
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
@@ -175,7 +175,7 @@ impl RenderState {
             depth_stencil_attachment: None,
         });
 
-        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_pipeline(&self.pipeline);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
 

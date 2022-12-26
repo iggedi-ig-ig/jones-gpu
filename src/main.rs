@@ -4,12 +4,11 @@ use crate::simulation::Atom;
 use eyre::Result;
 use nalgebra::Vector2;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::SeedableRng;
 use std::mem::size_of;
 use wgpu::{
-    Backends, BufferAddress, Color, CommandEncoderDescriptor, CompositeAlphaMode, DeviceDescriptor,
-    Features, Instance, Limits, LoadOp, Operations, PowerPreference, PresentMode,
-    RenderPassColorAttachment, RenderPassDescriptor, RequestAdapterOptions, SurfaceConfiguration,
+    Backends, CommandEncoderDescriptor, CompositeAlphaMode, DeviceDescriptor, Features, Instance,
+    Limits, PowerPreference, PresentMode, RequestAdapterOptions, SurfaceConfiguration,
     TextureUsages, TextureViewDescriptor,
 };
 use winit::event::{DeviceEvent, Event, MouseScrollDelta, WindowEvent};
@@ -20,7 +19,7 @@ pub mod render;
 pub mod simulation;
 
 /// grid side length
-const GRID_SIZE: f32 = 50.0;
+const GRID_SIZE: f32 = 100.0;
 
 /// cell side length
 const CELL_SIZE: f32 = 2.0;
@@ -57,14 +56,20 @@ async fn main() -> Result<()> {
         )
         .await?;
 
-    let atom_count = 10000;
-    let atoms = (0..atom_count)
-        .map(|_| {
-            Atom::new(
-                Vector2::from_fn(|_, _| rng.gen::<f32>() * GRID_SIZE),
-                Vector2::zeros(),
-                Vector2::zeros(),
-            )
+    let hexagonal_lattice = |i: usize, rng: &mut StdRng| -> Vector2<f32> {
+        let n = GRID_SIZE.floor() as usize;
+        Vector2::new(
+            (i % n) as f32 + if (i / n) % 2 == 0 { 0.5 } else { 0.0 },
+            (i / n) as f32 * 3.0f32.sqrt() * 0.5,
+        )
+    };
+
+    let count = (GRID_SIZE / 1.0).floor() as usize
+        * (GRID_SIZE / (3.0f32.sqrt() * 0.5) / 1.0).floor() as usize; // hex
+    let atoms = (0..count)
+        .map(|i| {
+            let pos = hexagonal_lattice(i, &mut rng);
+            Atom::new(pos, Vector2::zeros(), Vector2::zeros())
         })
         .collect::<Vec<_>>();
 
