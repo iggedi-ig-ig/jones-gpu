@@ -167,7 +167,10 @@ impl HashGrid {
         let integrate_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Integrate Pipeline Layout"),
             bind_group_layouts: &[&atom_bind_group_layout],
-            push_constant_ranges: &[],
+            push_constant_ranges: &[PushConstantRange {
+                stages: ShaderStages::COMPUTE,
+                range: 0..size_of::<PushConstants>() as u32,
+            }],
         });
         let integrate_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Integrate Compute Pipeline"),
@@ -215,6 +218,7 @@ impl HashGrid {
 
         integrate_pass.set_pipeline(&self.integrate_pipeline);
         integrate_pass.set_bind_group(0, &self.atom_bind_group, &[]);
+        integrate_pass.set_push_constants(0, bytemuck::bytes_of(&self.cells_per_side));
         integrate_pass.dispatch_workgroups(
             self.cells_per_side as u32,
             self.cells_per_side as u32,

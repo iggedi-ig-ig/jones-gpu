@@ -27,7 +27,7 @@ fn lennard_jones(dist_sq: f32) -> f32 {
     let sigma_fac = 1.122462048309373;
     let sigma = desired_radius / sigma_fac;
     let sigma_6 = sigma * sigma * sigma * sigma * sigma * sigma;
-    let epsilon = 0.25;
+    let epsilon = 0.75;
 
 
     return max(-1e7, (24.0 * epsilon * sigma_6 * (dist_sq * dist_sq * dist_sq - 2.0 * sigma_6)) / (dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq));
@@ -85,7 +85,7 @@ fn main_integrate(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let self_id = hash(vec2<i32>(global_id.xy));
     let self_cell = &cells[self_id];
 
-    let time_step = 1e-3;
+    let time_step = 1e-7;
     let mass = 1.0;
 
     for (var i = 0; i < min(16, (*self_cell).count); i++) {
@@ -93,9 +93,6 @@ fn main_integrate(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         atoms_curr[index].vel_x += atoms_curr[index].force_x / mass;
         atoms_curr[index].vel_y += atoms_curr[index].force_y / mass;
-
-        atoms_curr[index].vel_x *= 0.99995;
-        atoms_curr[index].vel_y *= 0.99995;
 
         atoms_curr[index].pos_x += atoms_curr[index].vel_x * time_step;
         atoms_curr[index].pos_y += atoms_curr[index].vel_y * time_step;

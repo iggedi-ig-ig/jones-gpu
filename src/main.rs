@@ -6,6 +6,7 @@ use nalgebra::Vector2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::mem::size_of;
+use std::time::{Duration, Instant};
 use wgpu::{
     Backends, CommandEncoderDescriptor, CompositeAlphaMode, DeviceDescriptor, Features, Instance,
     Limits, PowerPreference, PresentMode, RequestAdapterOptions, SurfaceConfiguration,
@@ -19,7 +20,7 @@ pub mod render;
 pub mod simulation;
 
 /// grid side length
-const GRID_SIZE: f32 = 500.0;
+const GRID_SIZE: f32 = 100.0;
 
 /// cell side length
 const CELL_SIZE: f32 = 2.0;
@@ -97,6 +98,8 @@ async fn main() -> Result<()> {
         surface_configuration.width as f32 / surface_configuration.height as f32,
         &queue,
     );
+
+    let mut last_frame = Instant::now();
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
             window_id,
@@ -137,7 +140,12 @@ async fn main() -> Result<()> {
             let mut command_encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor::default());
 
-            hash_grid.update(&mut command_encoder);
+            let elapsed = last_frame.elapsed();
+            if elapsed > Duration::from_millis(5) {
+                hash_grid.update(&mut command_encoder);
+                last_frame = Instant::now();
+            }
+
             render_state.render(
                 &mut command_encoder,
                 &view,
