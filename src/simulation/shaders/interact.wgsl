@@ -34,7 +34,7 @@ fn lennard_jones(dist_sq: f32) -> f32 {
 }
 
 fn hash(id: vec2<i32>) -> i32 {
-    return clamp(id.y, 0, push_constants.cells_per_side) * push_constants.cells_per_side + clamp(id.x, 0, push_constants.cells_per_side);
+    return clamp(id.y, 0, push_constants.cells_per_side - 1) * push_constants.cells_per_side + clamp(id.x, 0, push_constants.cells_per_side - 1);
 }
 
 @compute

@@ -1,4 +1,5 @@
 use crate::simulation::Atom;
+use crate::TextureUsages;
 use bytemuck::{Pod, Zeroable};
 use nalgebra::Vector2;
 use std::cmp::Ordering;
@@ -6,14 +7,20 @@ use std::default::Default;
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
-    include_wgsl, vertex_attr_array, Buffer, BufferAddress, BufferUsages, Color, ColorTargetState,
-    ColorWrites, CommandEncoder, CommandEncoderDescriptor, Device, FragmentState, IndexFormat,
-    LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PrimitiveState,
-    PushConstantRange, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, ShaderStages, Surface, TextureFormat, TextureView, VertexAttribute,
-    VertexBufferLayout, VertexState, VertexStepMode,
+    include_wgsl, vertex_attr_array, AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry,
+    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
+    Buffer, BufferAddress, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder,
+    CommandEncoderDescriptor, Device, Extent3d, FragmentState, IndexFormat, LoadOp,
+    MultisampleState, Operations, PipelineLayoutDescriptor, PrimitiveState, PushConstantRange,
+    Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
+    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderStages, Surface,
+    Texture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+    TextureView, TextureViewDescriptor, TextureViewDimension, VertexAttribute, VertexBufferLayout,
+    VertexState, VertexStepMode,
 };
 use winit::dpi::PhysicalSize;
+
+pub mod colormap;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -41,6 +48,9 @@ pub struct RenderState {
     index_buffer: Buffer,
     index_count: u32,
     push_constants: PushConstants,
+
+    colormap_tex: Texture,
+    colormap_bg: BindGroup,
 }
 
 impl RenderState {
@@ -56,11 +66,12 @@ impl RenderState {
 impl RenderState {
     const VERTEX_COUNT: usize = 25;
 
-    pub fn from_slice(
+    pub fn new(
         device: &Device,
         surface_format: TextureFormat,
         grid_size: f32,
         aspect_ratio: f32,
+        queue: &Queue,
     ) -> Self {
         let vertex_fragment_shader =
             device.create_shader_module(include_wgsl!("shaders/vertex_fragment.wgsl"));
@@ -95,9 +106,31 @@ impl RenderState {
             usage: BufferUsages::INDEX,
         });
 
+        let colormap_tex_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("colormap bgl"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    count: None,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D1,
+                    },
+                },
+                BindGroupLayoutEntry {
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                    visibility: ShaderStages::FRAGMENT,
+                    binding: 1,
+                },
+            ],
+        });
+
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render Pipeline"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&colormap_tex_bgl],
             push_constant_ranges: &[PushConstantRange {
                 stages: ShaderStages::VERTEX,
                 range: 0..size_of::<PushConstants>() as u32,
@@ -137,6 +170,58 @@ impl RenderState {
             multiview: None,
         });
 
+        let colormap_tex = device.create_texture_with_data(
+            queue,
+            &TextureDescriptor {
+                label: Some("colormap TURBO"),
+                usage: TextureUsages::TEXTURE_BINDING,
+                format: TextureFormat::Rgba8UnormSrgb,
+                size: Extent3d {
+                    width: 256,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                dimension: TextureDimension::D1,
+                sample_count: 1,
+            },
+            colormap::TURBO
+                .iter()
+                .flat_map(|&[r, g, b]| {
+                    [(r * 255.9) as u8, (g * 255.9) as u8, (b * 255.9) as u8, 255]
+                })
+                .collect::<Vec<u8>>()
+                .as_slice(),
+        );
+
+        let colormap_bg = device.create_bind_group(&BindGroupDescriptor {
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&colormap_tex.create_view(
+                        &TextureViewDescriptor {
+                            label: Some("colormap view desc"),
+                            dimension: Some(TextureViewDimension::D1),
+                            aspect: TextureAspect::All,
+                            ..Default::default()
+                        },
+                    )),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&device.create_sampler(
+                        &SamplerDescriptor {
+                            label: Some("colormap sampler"),
+                            address_mode_u: AddressMode::ClampToEdge,
+                            ..Default::default()
+                        },
+                    )),
+                },
+            ],
+            label: Some("colormap bg"),
+            layout: &colormap_tex_bgl,
+        });
+
         Self {
             pipeline: render_pipeline,
             vertex_buffer,
@@ -147,6 +232,8 @@ impl RenderState {
                 inv_aspect: 1.0 / aspect_ratio,
                 scale: 1.0,
             },
+            colormap_tex,
+            colormap_bg,
         }
     }
 
@@ -178,6 +265,7 @@ impl RenderState {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+        render_pass.set_bind_group(0, &self.colormap_bg, &[]);
 
         render_pass.set_index_buffer(self.index_buffer.slice(..), IndexFormat::Uint16);
         render_pass.set_push_constants(

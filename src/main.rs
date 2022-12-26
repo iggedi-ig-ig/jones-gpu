@@ -90,11 +90,12 @@ async fn main() -> Result<()> {
     surface.configure(&device, &surface_configuration);
 
     let hash_grid = HashGrid::from_slice(&device, &atoms, GRID_SIZE, CELL_SIZE);
-    let mut render_state = RenderState::from_slice(
+    let mut render_state = RenderState::new(
         &device,
         texture_format,
         GRID_SIZE,
         surface_configuration.width as f32 / surface_configuration.height as f32,
+        &queue,
     );
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
