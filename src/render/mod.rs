@@ -7,11 +7,11 @@ use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
     include_wgsl, vertex_attr_array, Buffer, BufferAddress, BufferUsages, Color, ColorTargetState,
-    ColorWrites, CommandEncoder, CommandEncoderDescriptor, Device, FragmentState, IndexFormat,
-    LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PrimitiveState,
-    PushConstantRange, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, ShaderStages, Surface, TextureFormat, TextureView, VertexAttribute,
-    VertexBufferLayout, VertexState, VertexStepMode,
+    ColorWrites, CommandEncoder, Device, FragmentState, IndexFormat, LoadOp, MultisampleState,
+    Operations, PipelineLayoutDescriptor, PrimitiveState, PushConstantRange,
+    RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor,
+    ShaderStages, TextureFormat, TextureView, VertexAttribute, VertexBufferLayout, VertexState,
+    VertexStepMode,
 };
 use winit::dpi::PhysicalSize;
 
