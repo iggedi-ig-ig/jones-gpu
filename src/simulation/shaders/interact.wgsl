@@ -4,7 +4,8 @@ struct Atom {
     vel_x: f32,
     vel_y: f32,
     force_x: f32,
-    force_y: f32
+    force_y: f32,
+    visual: f32,
 }
 
 struct Cell {
@@ -24,10 +25,10 @@ var<push_constant> push_constants: PushConstants;
 
 fn lennard_jones(dist_sq: f32) -> f32 {
     let desired_radius = 1.0;
-    let sigma_fac = 1.122462048309373;
+    let sigma_fac = 1.122462048309373; // 6th root of 2, the factor of the root relative to sigma
     let sigma = desired_radius / sigma_fac;
     let sigma_6 = sigma * sigma * sigma * sigma * sigma * sigma;
-    let epsilon = 0.75;
+    let epsilon = 0.25 * 3.0;
 
 
     return max(-1e7, (24.0 * epsilon * sigma_6 * (dist_sq * dist_sq * dist_sq - 2.0 * sigma_6)) / (dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq * dist_sq));
@@ -63,15 +64,16 @@ fn main_interact(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
                         let other_atom = atoms_last[other_index];
                         let other_pos = vec2<f32>(other_atom.pos_x, other_atom.pos_y);
 
-                        let diff = self_pos - other_pos;
+                        let diff = other_pos - self_pos;
                         let dist_sq = dot(diff, diff);
 
-                        let force_mag_mult = -lennard_jones(dist_sq);
-                        let force = diff * force_mag_mult;
+                        let force = diff * lennard_jones(dist_sq);
 
                         // interact
                         atoms_curr[self_index].force_x += force.x;
                         atoms_curr[self_index].force_y += force.y;
+                        atoms_curr[other_index].force_x -= force.x;
+                        atoms_curr[other_index].force_y -= force.y;
                     }
                 }
             }
@@ -85,7 +87,7 @@ fn main_integrate(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let self_id = hash(vec2<i32>(global_id.xy));
     let self_cell = &cells[self_id];
 
-    let time_step = 1e-7;
+    let time_step = 1e-5;
     let mass = 1.0;
 
     for (var i = 0; i < min(16, (*self_cell).count); i++) {
@@ -96,6 +98,10 @@ fn main_integrate(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         atoms_curr[index].pos_x += atoms_curr[index].vel_x * time_step;
         atoms_curr[index].pos_y += atoms_curr[index].vel_y * time_step;
+
+        let vis = log2(length(vec2<f32>(atoms_curr[index].force_x, atoms_curr[index].force_y)) + 1.0) * 0.07;
+        let k = 0.01;
+        atoms_curr[index].visual = mix(atoms_curr[index].visual, vis, k);
 
         atoms_curr[index].force_x = 0.0;
         atoms_curr[index].force_y = 0.0;

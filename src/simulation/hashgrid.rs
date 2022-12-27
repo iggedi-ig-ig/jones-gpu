@@ -1,6 +1,7 @@
 use crate::simulation::Atom;
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
+use std::sync::Arc;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
     include_wgsl, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
@@ -22,7 +23,7 @@ struct PushConstants {
 #[derive(Copy, Clone, Pod, Zeroable, Default)]
 /// represents a hash grid cell on the gpu
 pub struct HashGridCell {
-    /// the amount of atoms this cell contains. Note that this can go above the size of what the indices array can hold.
+    /// the amount of atoms this cell contains. Note that this cannot exceed the length of the indices array.
     count: i32,
     /// the indices into the main atom array of the atoms that lie within this cell.
     indices: [i32; MAX_INDICES],
@@ -41,10 +42,11 @@ pub struct HashGrid {
     interact_pipeline: ComputePipeline,
     integrate_pipeline: ComputePipeline,
 
-    atom_buffer_curr: Buffer,
-    atom_buffer_last: Buffer,
+    atom_buffer_curr: Arc<Buffer>,
+    atom_buffer_last: Arc<Buffer>,
     atom_buffer_size: BufferAddress,
-    atom_bind_group: BindGroup,
+    atom_bind_group_a: BindGroup,
+    atom_bind_group_b: BindGroup,
     cell_buffer: Buffer,
 }
 
@@ -57,16 +59,23 @@ impl HashGrid {
     ) -> Self {
         let atom_buffer_content = bytemuck::cast_slice(atoms);
         let atom_buffer_size = atom_buffer_content.len() as BufferAddress;
-        let atom_buffer_desc = BufferInitDescriptor {
-            label: Some("Atom Buffer"),
+
+        let atom_buffer_curr = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Atom Buffer Current"),
             contents: atom_buffer_content,
             usage: BufferUsages::STORAGE
                 | BufferUsages::COPY_DST
                 | BufferUsages::COPY_SRC
                 | BufferUsages::VERTEX,
-        };
-        let atom_buffer_curr = device.create_buffer_init(&atom_buffer_desc);
-        let atom_buffer_last = device.create_buffer_init(&atom_buffer_desc);
+        });
+        let atom_buffer_last = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Atom Buffer Last"),
+            contents: atom_buffer_content,
+            usage: BufferUsages::STORAGE
+                | BufferUsages::COPY_DST
+                | BufferUsages::COPY_SRC
+                | BufferUsages::VERTEX,
+        });
 
         let cells_per_side = (grid_side_length / cell_side_length).ceil() as usize;
         let mut cells = vec![HashGridCell::default(); cells_per_side * cells_per_side];
@@ -129,8 +138,8 @@ impl HashGrid {
                 },
             ],
         });
-        let atom_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Atom Bind Group"),
+        let atom_bind_group_a = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Atom Bind Group A"),
             layout: &atom_bind_group_layout,
             entries: &[
                 BindGroupEntry {
@@ -140,6 +149,24 @@ impl HashGrid {
                 BindGroupEntry {
                     binding: 1,
                     resource: atom_buffer_last.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: cell_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        let atom_bind_group_b = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Atom Bind Group B"),
+            layout: &atom_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: atom_buffer_last.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: atom_buffer_curr.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 2,
@@ -188,55 +215,52 @@ impl HashGrid {
             interact_pipeline,
             integrate_pipeline,
 
-            atom_buffer_curr,
-            atom_buffer_last,
+            atom_buffer_curr: Arc::new(atom_buffer_curr),
+            atom_buffer_last: Arc::new(atom_buffer_last),
             atom_buffer_size,
-            atom_bind_group,
+            atom_bind_group_a,
+            atom_bind_group_b,
             cell_buffer,
         }
     }
 
     pub fn update(&self, command_encoder: &mut CommandEncoder) {
-        let mut interact_pass = command_encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Interact Pass"),
-        });
+        for bg in [&self.atom_bind_group_a, &self.atom_bind_group_b] {
+            {
+                let mut interact_pass =
+                    command_encoder.begin_compute_pass(&ComputePassDescriptor {
+                        label: Some("Interact Pass"),
+                    });
 
-        interact_pass.set_pipeline(&self.interact_pipeline);
-        interact_pass.set_bind_group(0, &self.atom_bind_group, &[]);
-        interact_pass.set_push_constants(0, bytemuck::bytes_of(&self.cells_per_side));
-        interact_pass.dispatch_workgroups(
-            self.cells_per_side as u32,
-            self.cells_per_side as u32,
-            1,
-        );
+                interact_pass.set_pipeline(&self.interact_pipeline);
+                interact_pass.set_bind_group(0, bg, &[]);
+                interact_pass.set_push_constants(0, bytemuck::bytes_of(&self.cells_per_side));
+                interact_pass.dispatch_workgroups(
+                    self.cells_per_side as u32,
+                    self.cells_per_side as u32,
+                    1,
+                );
+            }
 
-        drop(interact_pass);
+            {
+                let mut integrate_pass =
+                    command_encoder.begin_compute_pass(&ComputePassDescriptor {
+                        label: Some("Integrate Pass"),
+                    });
 
-        let mut integrate_pass = command_encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Integrate Pass"),
-        });
-
-        integrate_pass.set_pipeline(&self.integrate_pipeline);
-        integrate_pass.set_bind_group(0, &self.atom_bind_group, &[]);
-        integrate_pass.set_push_constants(0, bytemuck::bytes_of(&self.cells_per_side));
-        integrate_pass.dispatch_workgroups(
-            self.cells_per_side as u32,
-            self.cells_per_side as u32,
-            1,
-        );
-
-        drop(integrate_pass);
-
-        command_encoder.copy_buffer_to_buffer(
-            &self.atom_buffer_curr,
-            0,
-            &self.atom_buffer_last,
-            0,
-            self.atom_buffer_size,
-        );
+                integrate_pass.set_pipeline(&self.integrate_pipeline);
+                integrate_pass.set_bind_group(0, bg, &[]);
+                integrate_pass.set_push_constants(0, bytemuck::bytes_of(&self.cells_per_side));
+                integrate_pass.dispatch_workgroups(
+                    self.cells_per_side as u32,
+                    self.cells_per_side as u32,
+                    1,
+                );
+            }
+        }
     }
 
-    pub fn instance_buffer(&self) -> &Buffer {
+    pub fn instance_buffer(&self) -> &Arc<Buffer> {
         &self.atom_buffer_curr
     }
 }

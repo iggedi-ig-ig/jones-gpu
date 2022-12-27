@@ -6,11 +6,13 @@ use nalgebra::Vector2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::mem::size_of;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wgpu::{
     Backends, CommandEncoderDescriptor, CompositeAlphaMode, DeviceDescriptor, Features, Instance,
-    Limits, PowerPreference, PresentMode, RequestAdapterOptions, SurfaceConfiguration,
-    TextureUsages, TextureViewDescriptor,
+    Limits, Maintain, MaintainBase, PowerPreference, PresentMode, QuerySetDescriptor, QueryType,
+    RequestAdapterOptions, SurfaceConfiguration, TextureUsages, TextureViewDescriptor,
 };
 use winit::event::{DeviceEvent, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -47,7 +49,7 @@ async fn main() -> Result<()> {
         .request_device(
             &DeviceDescriptor {
                 label: Some("Device"),
-                features: Features::PUSH_CONSTANTS,
+                features: Features::PUSH_CONSTANTS | Features::TIMESTAMP_QUERY,
                 limits: Limits {
                     max_push_constant_size: size_of::<PushConstants>() as u32,
                     ..Default::default()
@@ -56,6 +58,9 @@ async fn main() -> Result<()> {
             None,
         )
         .await?;
+
+    let device = Arc::new(device);
+    let queue = Arc::new(queue);
 
     let hexagonal_lattice = |i: usize, rng: &mut StdRng| -> Vector2<f32> {
         let n = GRID_SIZE.floor() as usize;
@@ -70,7 +75,7 @@ async fn main() -> Result<()> {
     let atoms = (0..count)
         .filter_map(|i| {
             if rng.gen::<f32>() < 0.01 {
-                return None;
+                //  return None;
             }
 
             let pos = hexagonal_lattice(i, &mut rng);
@@ -98,6 +103,44 @@ async fn main() -> Result<()> {
         surface_configuration.width as f32 / surface_configuration.height as f32,
         &queue,
     );
+
+    let ib = hash_grid.instance_buffer().clone();
+
+    tokio::spawn({
+        let device = device.clone();
+        let queue = queue.clone();
+
+        let qs = device.create_query_set(&QuerySetDescriptor {
+            label: Some("compute timer"),
+            count: 2,
+            ty: QueryType::Timestamp,
+        });
+
+        async move {
+            let mut tick = Arc::new(AtomicU64::new(0));
+            let mut i = 0;
+
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let mut command_encoder =
+                    device.create_command_encoder(&CommandEncoderDescriptor::default());
+                command_encoder.write_timestamp(&qs, 0);
+                hash_grid.update(&mut command_encoder);
+                command_encoder.write_timestamp(&qs, 1);
+
+                queue.submit(Some(command_encoder.finish()));
+                queue.on_submitted_work_done({
+                    let tick = tick.clone();
+                    move || {
+                        let _ = tick.fetch_add(1, Ordering::Relaxed);
+                    }
+                });
+                i += 1;
+                //println!("{} {}", tick.load(Ordering::Relaxed), i);
+                // while !device.poll(Maintain::Wait) {}
+            }
+        }
+    });
 
     let mut last_frame = Instant::now();
     event_loop.run(move |event, _, control_flow| match event {
@@ -140,18 +183,7 @@ async fn main() -> Result<()> {
             let mut command_encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor::default());
 
-            let elapsed = last_frame.elapsed();
-            if elapsed > Duration::from_millis(5) {
-                hash_grid.update(&mut command_encoder);
-                last_frame = Instant::now();
-            }
-
-            render_state.render(
-                &mut command_encoder,
-                &view,
-                atoms.len() as u32,
-                hash_grid.instance_buffer(),
-            );
+            render_state.render(&mut command_encoder, &view, atoms.len() as u32, &ib);
             queue.submit(Some(command_encoder.finish()));
 
             frame.present();
