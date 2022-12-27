@@ -92,7 +92,14 @@ impl HashGrid {
             cell.count += 1;
         });
 
-        dbg!(cells.iter().max_by_key(|cell| cell.count).map(|a| a.count));
+        println!(
+            "max atoms per cell: {}",
+            cells
+                .iter()
+                .max_by_key(|cell| cell.count)
+                .map(|a| a.count)
+                .unwrap()
+        );
 
         let cell_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Cell Buffer"),
@@ -225,7 +232,16 @@ impl HashGrid {
     }
 
     pub fn update(&self, command_encoder: &mut CommandEncoder) {
-        for bg in [&self.atom_bind_group_a, &self.atom_bind_group_b] {
+        for (bg, (ba, bb)) in [
+            (
+                &self.atom_bind_group_a,
+                (&self.atom_buffer_curr, &self.atom_buffer_last),
+            ),
+            (
+                &self.atom_bind_group_b,
+                (&self.atom_buffer_last, &self.atom_buffer_curr),
+            ),
+        ] {
             {
                 let mut interact_pass =
                     command_encoder.begin_compute_pass(&ComputePassDescriptor {
@@ -257,6 +273,8 @@ impl HashGrid {
                     1,
                 );
             }
+
+            //command_encoder.copy_buffer_to_buffer(ba, 0, bb, 0, self.atom_buffer_size);
         }
     }
 

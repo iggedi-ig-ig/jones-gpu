@@ -6,7 +6,7 @@ use nalgebra::Vector2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::mem::size_of;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wgpu::{
@@ -106,9 +106,12 @@ async fn main() -> Result<()> {
 
     let ib = hash_grid.instance_buffer().clone();
 
+    let running = Arc::new(AtomicBool::new(true));
+
     tokio::spawn({
         let device = device.clone();
         let queue = queue.clone();
+        let running = running.clone();
 
         let qs = device.create_query_set(&QuerySetDescriptor {
             label: Some("compute timer"),
@@ -120,8 +123,8 @@ async fn main() -> Result<()> {
             let mut tick = Arc::new(AtomicU64::new(0));
             let mut i = 0;
 
-            loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+            while running.load(Ordering::Relaxed) {
+                // tokio::time::sleep(Duration::from_millis(500)).await;
                 let mut command_encoder =
                     device.create_command_encoder(&CommandEncoderDescriptor::default());
                 command_encoder.write_timestamp(&qs, 0);
@@ -158,7 +161,10 @@ async fn main() -> Result<()> {
                 render_state.resize(new_size);
                 surface.configure(&device, &surface_configuration);
             }
-            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+            WindowEvent::CloseRequested => {
+                running.store(false, Ordering::Relaxed);
+                *control_flow = ControlFlow::Exit;
+            }
             WindowEvent::KeyboardInput { .. } => {
                 // TODO: keyboard input
             }
@@ -188,7 +194,9 @@ async fn main() -> Result<()> {
 
             frame.present();
         }
-        Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
+        Event::LoopDestroyed => {
+            *control_flow = ControlFlow::Exit;
+        }
         _ => {}
     });
 }

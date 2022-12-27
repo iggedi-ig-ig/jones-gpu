@@ -93,11 +93,11 @@ fn main_integrate(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var i = 0; i < min(16, (*self_cell).count); i++) {
         let index = (*self_cell).indices[i];
 
-        atoms_curr[index].vel_x += atoms_curr[index].force_x / mass;
-        atoms_curr[index].vel_y += atoms_curr[index].force_y / mass;
+        atoms_curr[index].vel_x = atoms_last[index].vel_x + atoms_curr[index].force_x / mass;
+        atoms_curr[index].vel_y = atoms_last[index].vel_y + atoms_curr[index].force_y / mass;
 
-        atoms_curr[index].pos_x += atoms_curr[index].vel_x * time_step;
-        atoms_curr[index].pos_y += atoms_curr[index].vel_y * time_step;
+        atoms_curr[index].pos_x = atoms_last[index].pos_x + atoms_curr[index].vel_x * time_step;
+        atoms_curr[index].pos_y = atoms_last[index].pos_y + atoms_curr[index].vel_y * time_step;
 
         let vis = log2(length(vec2<f32>(atoms_curr[index].force_x, atoms_curr[index].force_y)) + 1.0) * 0.07;
         let k = 0.01;
